@@ -42,7 +42,10 @@ class ReportList(object):
         self.can_show_all = True
         self.paginator = None  # self.report.get_paginator()
         try:
-            self.page_num = int(self.request.GET.get(PAGE_VAR, 0))
+            # Rasayu: Set default `PAGE_VAR` as 1 instead of 0 to fix
+            # `EmptyPage: That page number is less than 1` error.
+            # self.page_num = int(self.request.GET.get(PAGE_VAR, 0))
+            self.page_num = int(self.request.GET.get(PAGE_VAR, 1))
         except ValueError:
             self.page_num = 0
         self.show_all = ALL_VAR in self.request.GET
@@ -191,6 +194,11 @@ class ReportList(object):
                 for idx, value in enumerate(record)
             ]
 
+    # Rasayu: Add `result_count` for grappelli pagination.html
+    @property
+    def result_count(self):
+        return len(self.report)
+
     def get_result_count(self):
         return len(self.report)
 
@@ -244,16 +252,18 @@ class ReportView(TemplateView, FormMixin):
     @property
     def media(self):
         # taken from django.contrib.admin.options ModelAdmin
+        # Rasayu: Fix JS, CSS issues: Comment all .js
+        # taken from django.contrib.admin.options ModelAdmin
         extra = "" if settings.DEBUG else ".min"
         js = [
-            "core.js",
-            "vendor/jquery/jquery%s.js" % extra,
-            "jquery.init.js",
-            "admin/RelatedObjectLookups.js",
-            "actions%s.js" % extra,
-            "urlify.js",
-            "prepopulate%s.js" % extra,
-            "vendor/xregexp/xregexp%s.js" % extra,
+            # "core.js",
+            # "vendor/jquery/jquery%s.js" % extra,
+            # "jquery.init.js",
+            # "admin/RelatedObjectLookups.js",
+            # "actions%s.js" % extra,
+            # "urlify.js",
+            # "prepopulate%s.js" % extra,
+            # "vendor/xregexp/xregexp%s.js" % extra,
         ]
         return forms.Media(js=[static("admin/js/%s" % url) for url in js])
 
@@ -355,10 +365,11 @@ class ReportView(TemplateView, FormMixin):
                 "export_path": rl.get_query_string({EXPORT_VAR: ""}),
                 "totals": self.report.get_has_totals(),
                 "totals_on_top": self.report.totals_on_top,
-                "suit": (
-                    ("suit" in settings.INSTALLED_APPS)
-                    or ("bootstrap_admin" in settings.INSTALLED_APPS)
-                ),
+                # Rasayu: Set `suit` to True as we are using Bootstrap
+                "suit": True,  #(
+                    # ("suit" in settings.INSTALLED_APPS)
+                    # or ("bootstrap_admin" in settings.INSTALLED_APPS)
+                # ),
             }
         )
         return kwargs
