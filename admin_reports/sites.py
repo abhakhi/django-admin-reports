@@ -1,7 +1,7 @@
 from __future__ import unicode_literals
 
 from django.apps import apps
-from django.conf.urls import url
+from django.conf.urls import re_path
 from django.contrib.admin.sites import site as admin_site
 from .views import ReportView
 from .reports import Report, camel_re
@@ -40,7 +40,7 @@ class AdminReportSite(object):
         for report in self._registry:
             app_name = apps.get_containing_app_config(report.__module__).name
             urlpatterns.append(
-                url(
+                re_path(
                     r"^{0}/{1}/$".format(
                         app_name.replace(".", "_"), report.__name__.lower()
                     ),
