@@ -1,7 +1,7 @@
 from __future__ import unicode_literals
 
 from django.apps import apps
-from django.conf.urls import re_path
+from django.urls import re_path
 from django.contrib.admin.sites import site as admin_site
 from .views import ReportView
 from .reports import Report, camel_re
