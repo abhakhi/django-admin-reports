@@ -22,7 +22,9 @@ class ExportForm(forms.Form):
             (csv.QUOTE_ALL, "All"),
         )
     )
-    escapechar = forms.ChoiceField(choices=(("", ""), ("\\", "\\")), required=False)
+    escapechar = forms.ChoiceField(
+        choices=(("", ""), ("\\", "\\")), required=False, initial="\\"
+    )
 
     def clean_quoting(self):
         quoting = self.cleaned_data.get("quoting")
