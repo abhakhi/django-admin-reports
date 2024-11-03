@@ -233,6 +233,10 @@ class Opts(object):
         return self._object_name
 
     object_name = property(get_object_name)
+    # Rasayu: Django 5.1 looks for `model_name` in
+    # django/contrib/admin/templatetags/base.py, line 35, in render:
+    # object_name = opts.model_name
+    model_name = property(get_object_name)
 
 
 class ReportView(TemplateView, FormMixin):
