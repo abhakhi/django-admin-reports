@@ -36,8 +36,6 @@ class ReportList(object):
     def __init__(self, request, report):
         self.request = request
         self.report = report
-        self.ordering_field_columns = self._get_ordering_field_columns()
-        self.report.set_sort_params(*self._get_ordering())
         self.multi_page = False
         self.can_show_all = True
         self.paginator = None  # self.report.get_paginator()
@@ -47,8 +45,22 @@ class ReportList(object):
             # self.page_num = int(self.request.GET.get(PAGE_VAR, 0))
             self.page_num = int(self.request.GET.get(PAGE_VAR, 1))
         except ValueError:
-            self.page_num = 0
+            self.page_num = 1
+        if self.page_num < 1:
+            self.page_num = 1
         self.show_all = ALL_VAR in self.request.GET
+        # Set pagination before any get_fields / aggregate triggered by sorting.
+        # Never pass show_all=True here: can_show_all is only known after a
+        # page-sized aggregate sets the total count.
+        if getattr(self.report, "page_aware", False):
+            self.report.set_pagination(
+                page=self.page_num,
+                per_page=self.report.get_list_per_page(),
+                show_all=False,
+                exporting=False,
+            )
+        self.ordering_field_columns = self._get_ordering_field_columns()
+        self.report.set_sort_params(*self._get_ordering())
 
     def get_query_string(self, new_params=None, remove=None):
         if new_params is None:
@@ -197,14 +209,63 @@ class ReportList(object):
     # Rasayu: Add `result_count` for grappelli pagination.html
     @property
     def result_count(self):
-        return len(self.report)
+        return self.get_result_count()
+
+    @property
+    def full_result_count(self):
+        return self.get_result_count()
+
+    @property
+    def show_full_result_count(self):
+        return False
+
+    @property
+    def num_sorted_fields(self):
+        return len(self.ordering_field_columns)
 
     def get_result_count(self):
+        if getattr(self.report, "page_aware", False):
+            # Ensure aggregate has run so set_total_count() was called.
+            if not getattr(self.report, "_evaluated", False):
+                self.report.get_results()
+            return self.report.get_total_count()
         return len(self.report)
 
     def paginate(self):
+        if getattr(self.report, "page_aware", False):
+            # Always evaluate one page first so total_count / can_show_all are
+            # known before optionally loading the full set.
+            self.report.set_pagination(
+                page=self.page_num,
+                per_page=self.report.get_list_per_page(),
+                show_all=False,
+                exporting=False,
+            )
+            # Current page of formatted rows only (already sliced in aggregate).
+            records = self.report.results
+            result_count = self.report.get_total_count()
+            # Dummy object_list: paginator is only used for page-number UI.
+            self.paginator = self.report.get_paginator(
+                object_list=[], count=result_count
+            )
+            self.multi_page = result_count > self.report.get_list_per_page()
+            self.can_show_all = result_count <= self.report.get_list_max_show_all()
+            if self.show_all and self.can_show_all:
+                self.report.set_pagination(
+                    page=1,
+                    show_all=True,
+                    exporting=False,
+                )
+                records = self.report.results
+            elif self.multi_page:
+                try:
+                    self.paginator.page(self.page_num)
+                except InvalidPage:
+                    raise IncorrectLookupParameters
+            return records
+
         records = self.report.results
-        self.paginator = self.report.get_paginator()
+        self.paginator = self.report.get_paginator(object_list=records)
         result_count = self.paginator.count
         self.multi_page = result_count > self.report.get_list_per_page()
         self.can_show_all = result_count <= self.report.get_list_max_show_all()
@@ -315,6 +376,10 @@ class ReportView(TemplateView, FormMixin):
             filename = context["title"].lower().replace(" ", "_")
             response = HttpResponse(content_type="text/csv")
             response["Content-Disposition"] = 'attachment;filename="%s.csv"' % filename
+            if getattr(self.report, "page_aware", False):
+                self.report.set_pagination(
+                    page=1, show_all=True, exporting=True
+                )
             self.report.to_csv(response, **form.cleaned_data)
             return response
         return self._export(form=form)

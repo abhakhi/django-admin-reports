@@ -210,6 +210,30 @@ Report.list_max_show_all
 
 ``list_max_show_all`` parameter passed to the ``Paginator`` class.
 
+Report.page_aware
+-----------------
+
+When ``True``, the report builds only the current page inside
+``aggregate`` instead of materializing the full result set and then
+slicing. Use this for expensive reports whose logical page unit is not
+a table row (e.g. patients that expand into many rows).
+
+In ``aggregate``::
+
+  pagination = self.get_pagination()
+  # pagination keys: page, per_page, show_all, exporting, offset, limit
+  qs = MyModel.objects.filter(...).order_by("pk")
+  self.set_total_count(qs.count())
+  limit = pagination["limit"]
+  if limit is not None:
+      qs = qs[pagination["offset"] : pagination["offset"] + limit]
+  # build and return only rows for this page
+  return [...]
+
+``limit`` / ``offset`` are ``None`` / ``0`` for CSV export and for
+show-all (when the total count is within ``list_max_show_all``).
+``list_per_page`` counts page units (e.g. patients), not HTML rows.
+
 Report.alignment
 ----------------
 

@@ -12,6 +12,7 @@ try:
 except ImportError:
     # django >= 1.9 does not have ValuesQuerySet anymore
     from django.db.models.query import QuerySet, ModelIterable
+from django.utils.functional import cached_property
 from django.utils.safestring import mark_safe
 from django.core.paginator import Paginator
 
@@ -24,6 +25,36 @@ from .forms import ExportForm
 
 logger = logging.getLogger(__name__)
 camel_re = re.compile("([a-z0-9])([A-Z])")
+
+
+class CountAwarePaginator(Paginator):
+    """Paginator that can use an explicit total count.
+
+    Used by page-aware reports that only materialize the current page of
+    results but still need correct page-number UI for the full result set.
+    """
+
+    def __init__(
+        self,
+        object_list,
+        per_page,
+        orphans=0,
+        allow_empty_first_page=True,
+        count=None,
+    ):
+        self._fixed_count = count
+        super(CountAwarePaginator, self).__init__(
+            object_list, per_page, orphans, allow_empty_first_page
+        )
+
+    @cached_property
+    def count(self):
+        if self._fixed_count is not None:
+            return int(self._fixed_count)
+        try:
+            return self.object_list.count()
+        except (AttributeError, TypeError):
+            return len(self.object_list)
 
 
 class Report(object):
@@ -43,6 +74,10 @@ class Report(object):
     export_form_class = ExportForm
     initial = {}
     auto_totals = None
+    # When True, ``aggregate`` receives pagination via ``get_pagination()`` /
+    # ``self`` and should return only the current page of rows while calling
+    # ``set_total_count()`` with the full result-unit count (e.g. patients).
+    page_aware = False
 
     def __init__(self, *args, **kwargs):
         self.set_sort_params()
@@ -50,8 +85,15 @@ class Report(object):
         self._data_type = "list"
         self._results = []
         self._totals = {}
+        self._page = 1
+        self._per_page = None
+        self._show_all = False
+        self._exporting = False
+        self._total_count = None
 
     def __len__(self):
+        if self.page_aware and self._total_count is not None:
+            return self._total_count
         if not self._evaluated:
             self._eval()
         if self._data_type == "qs":
@@ -162,6 +204,71 @@ class Report(object):
         self._evaluated = False
         self._evaluated_totals = False
 
+    def set_pagination(
+        self, page=1, per_page=None, show_all=False, exporting=False
+    ):
+        """Configure page-aware evaluation (no-op for non-page-aware reports).
+
+        Call before accessing results so ``aggregate`` can limit work to the
+        current page. Export / show-all should pass ``show_all=True`` or
+        ``exporting=True`` to process the full dataset.
+        """
+        try:
+            page = int(page)
+        except (TypeError, ValueError):
+            page = 1
+        page = page if page >= 1 else 1
+        show_all = bool(show_all)
+        exporting = bool(exporting)
+        if (
+            self._page == page
+            and self._per_page == per_page
+            and self._show_all == show_all
+            and self._exporting == exporting
+        ):
+            return
+        self._page = page
+        self._per_page = per_page
+        self._show_all = show_all
+        self._exporting = exporting
+        self._total_count = None
+        self._evaluated = False
+        self._evaluated_totals = False
+
+    def get_pagination(self):
+        """Return pagination knobs for ``aggregate`` implementations.
+
+        Keys:
+            page, per_page, show_all, exporting, offset, limit
+
+        ``limit`` / ``offset`` are ``None`` / ``0`` when show_all or exporting
+        so the report processes the full set.
+        """
+        per_page = (
+            self._per_page
+            if self._per_page is not None
+            else self.get_list_per_page()
+        )
+        show_all = self._show_all or self._exporting
+        return {
+            "page": self._page,
+            "per_page": per_page,
+            "show_all": show_all,
+            "exporting": self._exporting,
+            "offset": 0 if show_all else (self._page - 1) * per_page,
+            "limit": None if show_all else per_page,
+        }
+
+    def set_total_count(self, count):
+        """Store full result-unit count (e.g. matching patients) for the pager."""
+        self._total_count = int(count)
+
+    def get_total_count(self):
+        """Return full result-unit count used by pagination UI."""
+        if self._total_count is not None:
+            return self._total_count
+        return len(self)
+
     def get_results(self):
         if not self._evaluated:
             self._eval()
@@ -213,9 +320,11 @@ class Report(object):
         return []
 
     def get_fields(self):
-        if not self._evaluated:
-            self._eval()
+        # Avoid forcing a full aggregate when fields are already declared
+        # (critical for page-aware reports and sort-header rendering).
         if self.fields is None:
+            if not self._evaluated:
+                self._eval()
             if self._data_type == "df":
                 self.fields = self._results.columns
             elif self._data_type == "qs":
@@ -273,8 +382,16 @@ class Report(object):
     def get_has_totals(self):
         return self.has_totals
 
-    def get_paginator(self):
-        return self.paginator(self.results, self.get_list_per_page())
+    def get_paginator(self, object_list=None, count=None):
+        if object_list is None:
+            object_list = self.results
+        if self.page_aware:
+            if count is None:
+                count = self.get_total_count()
+            return CountAwarePaginator(
+                object_list, self.get_list_per_page(), count=count
+            )
+        return self.paginator(object_list, self.get_list_per_page())
 
     def get_list_max_show_all(self):
         return self.list_max_show_all
@@ -303,6 +420,11 @@ class Report(object):
     def aggregate(self, **kwargs):
         """ Implement here your data elaboration.
         Must return a list of dict.
+
+        Page-aware reports should:
+          * read ``self.get_pagination()`` for offset/limit
+          * call ``self.set_total_count(n)`` with the full unit count
+          * return only the current page of row dicts
         """
         raise NotImplementedError("Subclasses must implement this method")
 
@@ -318,6 +440,13 @@ class Report(object):
         extra_rows=None,
         **kwargs
     ):
+        if self.page_aware:
+            # Full dataset for export; keep any exporting flag the subclass set.
+            self.set_pagination(
+                page=1,
+                show_all=True,
+                exporting=True,
+            )
         writer = csv.writer(
             fileobj,
             delimiter=str(delimiter),
