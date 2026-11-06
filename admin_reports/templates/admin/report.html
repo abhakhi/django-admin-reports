@@ -70,7 +70,7 @@
                   <input type="submit" value="{% trans 'Search' %}" class="btn btn-info"/>
 
                   <span class="small quiet result-count">
-                    {{ rl.get_result_count }} {% trans 'results' %}
+                    {{ rl.get_result_count }} {{ rl.page_unit_plural }}
                     <a href="?">{% trans 'Clear query' %}</a>
                   </span>
                 </div>

@@ -234,6 +234,10 @@ In ``aggregate``::
 show-all (when the total count is within ``list_max_show_all``).
 ``list_per_page`` counts page units (e.g. patients), not HTML rows.
 
+Set ``page_unit_singular`` / ``page_unit_plural`` (default
+``result`` / ``results``) so the UI count matches the page unit, e.g.
+``patient`` / ``patients``.
+
 Report.alignment
 ----------------
 

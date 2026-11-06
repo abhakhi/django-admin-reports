@@ -220,6 +220,14 @@ class ReportList(object):
         return False
 
     @property
+    def page_unit_singular(self):
+        return self.report.get_page_unit_singular()
+
+    @property
+    def page_unit_plural(self):
+        return self.report.get_page_unit_plural()
+
+    @property
     def num_sorted_fields(self):
         return len(self.ordering_field_columns)
 

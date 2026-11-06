@@ -78,6 +78,10 @@ class Report(object):
     # ``self`` and should return only the current page of rows while calling
     # ``set_total_count()`` with the full result-unit count (e.g. patients).
     page_aware = False
+    # Labels for the pager / result-count UI when the page unit is not a row
+    # (e.g. page_unit_singular="patient", page_unit_plural="patients").
+    page_unit_singular = "result"
+    page_unit_plural = "results"
 
     def __init__(self, *args, **kwargs):
         self.set_sort_params()
@@ -398,6 +402,12 @@ class Report(object):
 
     def get_list_per_page(self):
         return self.list_per_page
+
+    def get_page_unit_singular(self):
+        return self.page_unit_singular
+
+    def get_page_unit_plural(self):
+        return self.page_unit_plural
 
     def get_export_form_class(self):
         return self.export_form_class
